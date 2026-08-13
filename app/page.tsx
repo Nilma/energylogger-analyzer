@@ -55,7 +55,7 @@ export default function Home() {
     <main className="shell">
       <section className="hero">
         <p className="eyebrow">ENERGY MEASUREMENT TOOL</p>
-        <h1>EnergyLoggerAnalyzer</h1>
+        <h1>EnergyLogger Analyzer</h1>
         <p className="intro">
           Upload a CSV measurement log. The analyzer keeps active samples,
           calculates power for each rail, integrates power over time, and

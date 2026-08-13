@@ -1,4 +1,4 @@
-# Energy Log Analyzer
+# EnergyLogger Analyzer
 
 A small Next.js + FastAPI application for uploading an energy measurement CSV
 and calculating energy consumption for each measurement rail.
