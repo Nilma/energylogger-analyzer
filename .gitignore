@@ -1,3 +1,5 @@
+.venv/
+.venv-1/
 # Node / npm
 node_modules/
 npm-debug.log*

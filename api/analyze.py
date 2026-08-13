@@ -5,19 +5,16 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 
 from api.analyzer import analyze_energy
 
-
-app = FastAPI(title="Energy Log Analyzer API")
-
-
-@app.get("/api")
-def home():
-    return {"message": "Energy Log Analyzer API is running."}
+app = FastAPI()
 
 
 @app.post("/api/analyze")
 async def analyze(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Please upload a CSV file.")
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload a CSV file."
+        )
 
     try:
         contents = await file.read()
@@ -33,10 +30,8 @@ async def analyze(file: UploadFile = File(...)):
             **result,
         }
 
-    except pd.errors.ParserError as exc:
+    except Exception as exc:
         raise HTTPException(
             status_code=400,
-            detail="The uploaded file could not be parsed as CSV.",
-        ) from exc
-    except (ValueError, TypeError, KeyError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+            detail=str(exc)
+        )
