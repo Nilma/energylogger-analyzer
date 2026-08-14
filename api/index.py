@@ -2,6 +2,7 @@ from io import BytesIO
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from vercel.blob import AsyncBlobClient
 
@@ -55,7 +56,10 @@ def home():
 
 @app.post("/api/analyze")
 async def analyze(file: UploadFile = File(...)):
-    if not file.filename or not file.filename.lower().endswith(".csv"):
+    if (
+        not file.filename
+        or not file.filename.lower().endswith(".csv")
+    ):
         raise HTTPException(
             status_code=400,
             detail="Please upload a CSV file.",
@@ -81,10 +85,17 @@ async def analyze(file: UploadFile = File(...)):
     except pd.errors.ParserError as exc:
         raise HTTPException(
             status_code=400,
-            detail="The uploaded file could not be parsed as CSV.",
+            detail=(
+                "The uploaded file could not "
+                "be parsed as CSV."
+            ),
         ) from exc
 
-    except (ValueError, TypeError, KeyError) as exc:
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+    ) as exc:
         raise HTTPException(
             status_code=400,
             detail=str(exc),
@@ -96,9 +107,21 @@ async def compare(request: CompareRequest):
     client = AsyncBlobClient()
 
     try:
+        print(
+            "Starting comparison:",
+            request.file1_pathname,
+            request.file2_pathname,
+        )
+
         contents1 = await read_private_blob(
             client,
             request.file1_pathname,
+        )
+
+        print(
+            "Downloaded measurement 1:",
+            len(contents1),
+            "bytes",
         )
 
         contents2 = await read_private_blob(
@@ -106,8 +129,19 @@ async def compare(request: CompareRequest):
             request.file2_pathname,
         )
 
-        df1 = pd.read_csv(BytesIO(contents1))
-        df2 = pd.read_csv(BytesIO(contents2))
+        print(
+            "Downloaded measurement 2:",
+            len(contents2),
+            "bytes",
+        )
+
+        df1 = pd.read_csv(
+            BytesIO(contents1)
+        )
+
+        df2 = pd.read_csv(
+            BytesIO(contents2)
+        )
 
         result1 = analyze_energy(df1)
         result2 = analyze_energy(df2)
@@ -138,7 +172,9 @@ async def compare(request: CompareRequest):
         rail_comparison = {}
 
         for rail in result1["energy_by_rail_j"]:
-            energy1 = result1["energy_by_rail_j"][rail]
+            energy1 = result1[
+                "energy_by_rail_j"
+            ][rail]
 
             energy2 = result2[
                 "energy_by_rail_j"
@@ -205,8 +241,7 @@ async def compare(request: CompareRequest):
                     duration_difference,
                     3,
                 ),
-                "rail_comparison":
-                    rail_comparison,
+                "rail_comparison": rail_comparison,
             },
         }
 
@@ -229,6 +264,20 @@ async def compare(request: CompareRequest):
             detail=str(exc),
         ) from exc
 
+    except Exception as exc:
+        import traceback
+
+        print("COMPARE ERROR:")
+        traceback.print_exc()
+
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": type(exc).__name__,
+                "message": str(exc),
+            },
+        )
+
     finally:
         try:
             await client.delete(
@@ -237,6 +286,11 @@ async def compare(request: CompareRequest):
                     request.file2_pathname,
                 ]
             )
+
+            print(
+                "Temporary blobs deleted."
+            )
+
         except Exception as delete_error:
             print(
                 "Unable to delete temporary blobs:",
