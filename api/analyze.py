@@ -7,7 +7,12 @@ from api.analyzer import analyze_energy
 
 app = FastAPI()
 
-
+@app.get("/api/analyze")
+def test_api():
+    return {
+        "status": "ok",
+        "message": "EnergyLogger Analyzer API is running"
+    }
 @app.post("/api/analyze")
 async def analyze(file: UploadFile = File(...)):
     if not file.filename or not file.filename.lower().endswith(".csv"):
