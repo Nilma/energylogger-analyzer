@@ -2,6 +2,8 @@ from io import BytesIO
 
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from pydantic import BaseModel
+from vercel.blob import AsyncBlobClient
 
 from api.analyzer import analyze_energy
 
@@ -9,9 +11,39 @@ from api.analyzer import analyze_energy
 app = FastAPI(title="EnergyLogger Analyzer")
 
 
-# --------------------------------
-# Test route
-# --------------------------------
+class CompareRequest(BaseModel):
+    file1_pathname: str
+    file2_pathname: str
+    file1_name: str
+    file2_name: str
+
+
+async def read_private_blob(
+    client: AsyncBlobClient,
+    pathname: str,
+) -> bytes:
+    result = await client.get(
+        pathname,
+        access="private",
+    )
+
+    if result is None or result.status_code != 200:
+        raise ValueError(
+            f"Unable to read uploaded file: {pathname}"
+        )
+
+    if result.stream is None:
+        raise ValueError(
+            f"Uploaded file had no content: {pathname}"
+        )
+
+    chunks = []
+
+    async for chunk in result.stream:
+        chunks.append(chunk)
+
+    return b"".join(chunks)
+
 
 @app.get("/api")
 def home():
@@ -21,20 +53,9 @@ def home():
     }
 
 
-# --------------------------------
-# Version 1 - Single file analysis
-# --------------------------------
-
 @app.post("/api/analyze")
 async def analyze(file: UploadFile = File(...)):
-
-    if not file.filename:
-        raise HTTPException(
-            status_code=400,
-            detail="No file was selected.",
-        )
-
-    if not file.filename.lower().endswith(".csv"):
+    if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(
             status_code=400,
             detail="Please upload a CSV file.",
@@ -69,30 +90,21 @@ async def analyze(file: UploadFile = File(...)):
             detail=str(exc),
         ) from exc
 
-# --------------------------------
-# VERSION 2
-# Compare TWO measurements
-# --------------------------------
+
 @app.post("/api/compare")
-async def compare(
-    file1: UploadFile = File(...),
-    file2: UploadFile = File(...),
-):
+async def compare(request: CompareRequest):
+    client = AsyncBlobClient()
+
     try:
-        if not file1.filename or not file1.filename.lower().endswith(".csv"):
-            raise ValueError("Measurement 1 must be a CSV file.")
+        contents1 = await read_private_blob(
+            client,
+            request.file1_pathname,
+        )
 
-        if not file2.filename or not file2.filename.lower().endswith(".csv"):
-            raise ValueError("Measurement 2 must be a CSV file.")
-
-        contents1 = await file1.read()
-        contents2 = await file2.read()
-
-        if not contents1:
-            raise ValueError("Measurement 1 is empty.")
-
-        if not contents2:
-            raise ValueError("Measurement 2 is empty.")
+        contents2 = await read_private_blob(
+            client,
+            request.file2_pathname,
+        )
 
         df1 = pd.read_csv(BytesIO(contents1))
         df2 = pd.read_csv(BytesIO(contents2))
@@ -127,9 +139,17 @@ async def compare(
 
         for rail in result1["energy_by_rail_j"]:
             energy1 = result1["energy_by_rail_j"][rail]
-            energy2 = result2["energy_by_rail_j"].get(rail, 0)
 
-            difference = energy2 - energy1
+            energy2 = result2[
+                "energy_by_rail_j"
+            ].get(
+                rail,
+                0,
+            )
+
+            difference = (
+                energy2 - energy1
+            )
 
             if energy1 != 0:
                 rail_percentage_change = (
@@ -139,9 +159,18 @@ async def compare(
                 rail_percentage_change = 0
 
             rail_comparison[rail] = {
-                "measurement1_j": round(energy1, 3),
-                "measurement2_j": round(energy2, 3),
-                "difference_j": round(difference, 3),
+                "measurement1_j": round(
+                    energy1,
+                    3,
+                ),
+                "measurement2_j": round(
+                    energy2,
+                    3,
+                ),
+                "difference_j": round(
+                    difference,
+                    3,
+                ),
                 "percentage_change": round(
                     rail_percentage_change,
                     2,
@@ -150,12 +179,12 @@ async def compare(
 
         return {
             "measurement1": {
-                "filename": file1.filename,
+                "filename": request.file1_name,
                 **result1,
             },
 
             "measurement2": {
-                "filename": file2.filename,
+                "filename": request.file2_name,
                 **result2,
             },
 
@@ -176,18 +205,40 @@ async def compare(
                     duration_difference,
                     3,
                 ),
-                "rail_comparison": rail_comparison,
+                "rail_comparison":
+                    rail_comparison,
             },
         }
 
     except pd.errors.ParserError as exc:
         raise HTTPException(
             status_code=400,
-            detail="One of the uploaded files could not be parsed as CSV.",
+            detail=(
+                "One of the uploaded files "
+                "could not be parsed as CSV."
+            ),
         ) from exc
 
-    except (ValueError, TypeError, KeyError) as exc:
+    except (
+        ValueError,
+        TypeError,
+        KeyError,
+    ) as exc:
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         ) from exc
+
+    finally:
+        try:
+            await client.delete(
+                [
+                    request.file1_pathname,
+                    request.file2_pathname,
+                ]
+            )
+        except Exception as delete_error:
+            print(
+                "Unable to delete temporary blobs:",
+                delete_error,
+            )

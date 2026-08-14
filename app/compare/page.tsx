@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useState } from "react";
+import { upload } from "@vercel/blob/client";
 
 type MeasurementResult = {
   filename: string;
@@ -42,57 +43,87 @@ export default function ComparePage() {
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(
-    event: FormEvent<HTMLFormElement>
-  ) {
-    event.preventDefault();
+  event: FormEvent<HTMLFormElement>
+) {
+  event.preventDefault();
 
-    if (!file1 || !file2) {
-      setError("Choose two CSV log files to compare.");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    setResult(null);
-
-    try {
-      const formData = new FormData();
-
-      formData.append("file1", file1);
-      formData.append("file2", file2);
-
-      const response = await fetch("/api/compare", {
-        method: "POST",
-        body: formData,
-      });
-
-      const text = await response.text();
-
-      if (!response.ok) {
-        throw new Error(
-          text || `Server error (${response.status})`
-        );
-      }
-
-      if (!text) {
-        throw new Error(
-          "The server returned an empty response."
-        );
-      }
-
-      const data = JSON.parse(text);
-
-      setResult(data);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Comparison failed."
-      );
-    } finally {
-      setLoading(false);
-    }
+  if (!file1 || !file2) {
+    setError(
+      "Choose two CSV log files to compare."
+    );
+    return;
   }
+
+  setLoading(true);
+  setError("");
+  setResult(null);
+
+  try {
+    const blob1 = await upload(
+      `energylogger/${Date.now()}-${file1.name}`,
+      file1,
+      {
+        access: "private",
+        handleUploadUrl: "/api/upload",
+      }
+    );
+
+    const blob2 = await upload(
+      `energylogger/${Date.now()}-${file2.name}`,
+      file2,
+      {
+        access: "private",
+        handleUploadUrl: "/api/upload",
+      }
+    );
+
+    const response = await fetch(
+      "/api/compare",
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify({
+          file1_pathname: blob1.pathname,
+          file2_pathname: blob2.pathname,
+
+          file1_name: file1.name,
+          file2_name: file2.name,
+        }),
+      }
+    );
+
+    const text = await response.text();
+
+    if (!response.ok) {
+      throw new Error(
+        text ||
+          `Server error (${response.status})`
+      );
+    }
+
+    if (!text) {
+      throw new Error(
+        "The server returned an empty response."
+      );
+    }
+
+    const data = JSON.parse(text);
+
+    setResult(data);
+  } catch (err) {
+    setError(
+      err instanceof Error
+        ? err.message
+        : "Comparison failed."
+    );
+  } finally {
+    setLoading(false);
+  }
+}
 
   return (
     <main className="shell">
