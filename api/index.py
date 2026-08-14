@@ -1,5 +1,6 @@
 from io import BytesIO
-
+import os
+import httpx
 import pandas as pd
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -23,30 +24,44 @@ async def read_private_blob(
     client: AsyncBlobClient,
     pathname: str,
 ) -> bytes:
-    result = await client.get(
-        pathname,
-        access="private",
-    )
+    token = os.environ.get("BLOB_READ_WRITE_TOKEN")
 
-    if result is None:
+    if not token:
         raise ValueError(
-            f"Unable to read uploaded file: {pathname}"
+            "BLOB_READ_WRITE_TOKEN is not configured."
         )
 
-    if result.status_code != 200:
+    # Get the private Blob URL from its metadata
+    blob = await client.head(pathname)
+
+    if not blob or not blob.url:
         raise ValueError(
-            f"Unable to read uploaded file: {pathname}. "
-            f"Status code: {result.status_code}"
+            f"Unable to locate uploaded file: {pathname}"
         )
 
-    contents = await result.bytes()
+    async with httpx.AsyncClient(
+        timeout=60.0
+    ) as http_client:
+        response = await http_client.get(
+            blob.url,
+            headers={
+                "Authorization": f"Bearer {token}",
+            },
+        )
 
-    if not contents:
+    if response.status_code != 200:
+        raise ValueError(
+            f"Unable to download uploaded file: "
+            f"{pathname}. "
+            f"Status code: {response.status_code}"
+        )
+
+    if not response.content:
         raise ValueError(
             f"Uploaded file had no content: {pathname}"
         )
 
-    return contents
+    return response.content
 
 
 @app.get("/api")
