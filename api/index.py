@@ -18,13 +18,8 @@ def home():
 
 
 @app.post("/api/analyze")
-async def analyze(
-    file: UploadFile = File(...)
-):
-    if (
-        not file.filename
-        or not file.filename.lower().endswith(".csv")
-    ):
+async def analyze(file: UploadFile = File(...)):
+    if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(
             status_code=400,
             detail="Please upload a CSV file.",
@@ -34,14 +29,9 @@ async def analyze(
         contents = await file.read()
 
         if not contents:
-            raise ValueError(
-                "The uploaded CSV file is empty."
-            )
+            raise ValueError("The uploaded CSV file is empty.")
 
-        df = pd.read_csv(
-            BytesIO(contents)
-        )
-
+        df = pd.read_csv(BytesIO(contents))
         result = analyze_energy(df)
 
         return {
@@ -52,17 +42,10 @@ async def analyze(
     except pd.errors.ParserError as exc:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "The uploaded file could not "
-                "be parsed as CSV."
-            ),
+            detail="The uploaded file could not be parsed as CSV.",
         ) from exc
 
-    except (
-        ValueError,
-        TypeError,
-        KeyError,
-    ) as exc:
+    except (ValueError, TypeError, KeyError) as exc:
         raise HTTPException(
             status_code=400,
             detail=str(exc),
