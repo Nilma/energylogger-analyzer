@@ -9,10 +9,6 @@ from api.analyzer import analyze_energy
 app = FastAPI(title="EnergyLogger Analyzer")
 
 
-# --------------------------------
-# Test route
-# --------------------------------
-
 @app.get("/api")
 def home():
     return {
@@ -21,20 +17,9 @@ def home():
     }
 
 
-# --------------------------------
-# Version 1 - Single file analysis
-# --------------------------------
-
 @app.post("/api/analyze")
 async def analyze(file: UploadFile = File(...)):
-
-    if not file.filename:
-        raise HTTPException(
-            status_code=400,
-            detail="No file was selected.",
-        )
-
-    if not file.filename.lower().endswith(".csv"):
+    if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(
             status_code=400,
             detail="Please upload a CSV file.",
@@ -44,12 +29,9 @@ async def analyze(file: UploadFile = File(...)):
         contents = await file.read()
 
         if not contents:
-            raise ValueError(
-                "The uploaded CSV file is empty."
-            )
+            raise ValueError("The uploaded CSV file is empty.")
 
         df = pd.read_csv(BytesIO(contents))
-
         result = analyze_energy(df)
 
         return {

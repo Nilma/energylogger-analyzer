@@ -1,147 +1,186 @@
-from io import BytesIO
+from __future__ import annotations
 
 import pandas as pd
-from fastapi import FastAPI, File, HTTPException, UploadFile
-
-from api.analyzer import analyze_energy
+from scipy import integrate
 
 
-app = FastAPI(title="EnergyLogger Analyzer")
+RAILS = {
+    "3V7_WL_SW": (
+        "3V7_WL_SW_A current(0)",
+        "3V7_WL_SW_V volt(8)",
+    ),
+    "3V3_SYS": (
+        "3V3_SYS_A current(1)",
+        "3V3_SYS_V volt(9)",
+    ),
+    "1V8_SYS": (
+        "1V8_SYS_A current(2)",
+        "1V8_SYS_V volt(10)",
+    ),
+    "DDR_VDD2": (
+        "DDR_VDD2_A current(3)",
+        "DDR_VDD2_V volt(11)",
+    ),
+    "DDR_VDDQ": (
+        "DDR_VDDQ_A current(4)",
+        "DDR_VDDQ_V volt(12)",
+    ),
+    "1V1_SYS": (
+        "1V1_SYS_A current(5)",
+        "1V1_SYS_V volt(13)",
+    ),
+    "0V8_SW": (
+        "0V8_SW_A current(6)",
+        "0V8_SW_V volt(14)",
+    ),
+    "VDD_CORE": (
+        "VDD_CORE_A current(7)",
+        "VDD_CORE_V volt(15)",
+    ),
+    "3V3_DAC": (
+        "3V3_DAC_A current(17)",
+        "3V3_DAC_V volt(20)",
+    ),
+    "3V3_ADC": (
+        "3V3_ADC_A current(18)",
+        "3V3_ADC_V volt(21)",
+    ),
+    "0V8_AON": (
+        "0V8_AON_A current(16)",
+        "0V8_AON_V volt(19)",
+    ),
+    "HDMI": (
+        "HDMI_A current(22)",
+        "HDMI_V volt(23)",
+    ),
+}
 
 
-def read_csv(contents: bytes) -> pd.DataFrame:
-    if not contents:
-        raise ValueError("The uploaded CSV file is empty.")
+def analyze_energy(df: pd.DataFrame) -> dict:
+    required_columns = {
+        "active",
+        "duration_s",
+    }
 
-    return pd.read_csv(BytesIO(contents))
+    for current_column, voltage_column in RAILS.values():
+        required_columns.add(current_column)
+        required_columns.add(voltage_column)
 
+    missing = sorted(
+        required_columns - set(df.columns)
+    )
 
-@app.post("/api/analyze")
-async def analyze(
-    file1: UploadFile = File(...),
-    file2: UploadFile | None = File(None),
-):
-    try:
-        # -------------------------
-        # First measurement
-        # -------------------------
+    if missing:
+        raise ValueError(
+            "The CSV is missing required columns: "
+            + ", ".join(missing)
+        )
 
-        if not file1.filename.lower().endswith(".csv"):
-            raise ValueError("Measurement 1 must be a CSV file.")
+    active_df = (
+        df[df["active"] == 1]
+        .copy()
+        .reset_index(drop=True)
+    )
 
-        contents1 = await file1.read()
-        df1 = read_csv(contents1)
+    if active_df.empty:
+        raise ValueError(
+            "The CSV does not contain any rows where active == 1."
+        )
 
-        result1 = analyze_energy(df1)
+    if len(active_df) < 2:
+        raise ValueError(
+            "At least two active measurement rows are required."
+        )
 
-        response = {
-            "mode": "single",
-            "measurement1": {
-                "filename": file1.filename,
-                **result1,
-            }
-        }
+    active_df = (
+        active_df
+        .sort_values("duration_s")
+        .reset_index(drop=True)
+    )
 
-        # -------------------------
-        # Optional second measurement
-        # -------------------------
+    for rail, (
+        current_column,
+        voltage_column,
+    ) in RAILS.items():
 
-        if file2 is not None:
-            if not file2.filename.lower().endswith(".csv"):
-                raise ValueError("Measurement 2 must be a CSV file.")
-
-            contents2 = await file2.read()
-            df2 = read_csv(contents2)
-
-            result2 = analyze_energy(df2)
-
-            # -------------------------
-            # Calculate comparison
-            # -------------------------
-
-            energy_difference = (
-                result2["total_energy_j"]
-                - result1["total_energy_j"]
+        active_df[rail] = (
+            pd.to_numeric(
+                active_df[current_column],
+                errors="raise",
             )
-
-            if result1["total_energy_j"] != 0:
-                percentage_change = (
-                    energy_difference
-                    / result1["total_energy_j"]
-                ) * 100
-            else:
-                percentage_change = 0
-
-            average_power_difference = (
-                result2["average_power_w"]
-                - result1["average_power_w"]
+            *
+            pd.to_numeric(
+                active_df[voltage_column],
+                errors="raise",
             )
+        )
 
-            rail_comparison = {}
+    active_df["Total Power"] = (
+        active_df[
+            list(RAILS.keys())
+        ].sum(axis=1)
+    )
 
-            for rail in result1["energy_by_rail_j"]:
-                energy1 = result1["energy_by_rail_j"][rail]
-                energy2 = result2["energy_by_rail_j"].get(rail, 0)
+    x = pd.to_numeric(
+        active_df["duration_s"],
+        errors="raise",
+    ).to_numpy()
 
-                difference = energy2 - energy1
+    duration = float(
+        x.max() - x.min()
+    )
 
-                if energy1 != 0:
-                    percent_change = (
-                        difference / energy1
-                    ) * 100
-                else:
-                    percent_change = 0
+    if duration <= 0:
+        raise ValueError(
+            "The active measurement duration must be greater than zero."
+        )
 
-                rail_comparison[rail] = {
-                    "measurement1_j": round(energy1, 3),
-                    "measurement2_j": round(energy2, 3),
-                    "difference_j": round(difference, 3),
-                    "percentage_change": round(
-                        percent_change,
-                        2,
-                    ),
-                }
+    energy_by_rail = {}
 
-            response = {
-                "mode": "comparison",
+    for rail in RAILS:
+        y = active_df[rail].to_numpy()
 
-                "measurement1": {
-                    "filename": file1.filename,
-                    **result1,
-                },
+        energy = float(
+            integrate.trapezoid(
+                y,
+                x,
+            )
+        )
 
-                "measurement2": {
-                    "filename": file2.filename,
-                    **result2,
-                },
+        energy_by_rail[rail] = round(
+            energy,
+            3,
+        )
 
-                "comparison": {
-                    "energy_difference_j": round(
-                        energy_difference,
-                        3,
-                    ),
-                    "percentage_change": round(
-                        percentage_change,
-                        2,
-                    ),
-                    "average_power_difference_w": round(
-                        average_power_difference,
-                        3,
-                    ),
-                    "rail_comparison": rail_comparison,
-                },
-            }
+    total_power = (
+        active_df["Total Power"]
+        .to_numpy()
+    )
 
-        return response
+    total_energy = float(
+        integrate.trapezoid(
+            total_power,
+            x,
+        )
+    )
 
-    except pd.errors.ParserError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail="One of the uploaded files could not be parsed as CSV.",
-        ) from exc
+    average_power = (
+        total_energy / duration
+    )
 
-    except (ValueError, TypeError, KeyError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc),
-        ) from exc
+    return {
+        "duration_s": round(
+            duration,
+            3,
+        ),
+        "average_power_w": round(
+            average_power,
+            3,
+        ),
+        "total_energy_j": round(
+            total_energy,
+            3,
+        ),
+        "energy_by_rail_j":
+            energy_by_rail,
+    }
