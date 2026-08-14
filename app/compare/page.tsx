@@ -64,7 +64,7 @@ export default function ComparePage() {
       file1,
       {
         access: "private",
-        handleUploadUrl: "/api/upload",
+        handleUploadUrl: "/blob-upload",
       }
     );
 
@@ -73,7 +73,7 @@ export default function ComparePage() {
       file2,
       {
         access: "private",
-        handleUploadUrl: "/api/upload",
+        handleUploadUrl: "/blob-upload",
       }
     );
 
