@@ -233,3 +233,18 @@ storage.
 - Add automated tests using known EnergyLogger measurements
 - Add validation for different EnergyLogger CSV formats
 - Add additional statistical comparison metrics
+
+## License and copyright
+
+Copyright © 2026 Nilma Abbas. All rights reserved.
+
+EnergyLogger Analyzer is made available for educational, academic, research,
+and other non-commercial purposes.
+
+You may use, study, modify, and redistribute the software for non-commercial
+purposes, provided that appropriate credit is given to the original author.
+
+Commercial use of EnergyLogger Analyzer, including incorporation into
+commercial products or services, requires prior written permission from the
+copyright holder.
+
