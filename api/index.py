@@ -28,22 +28,25 @@ async def read_private_blob(
         access="private",
     )
 
-    if result is None or result.status_code != 200:
+    if result is None:
         raise ValueError(
             f"Unable to read uploaded file: {pathname}"
         )
 
-    if result.stream is None:
+    if result.status_code != 200:
+        raise ValueError(
+            f"Unable to read uploaded file: {pathname}. "
+            f"Status code: {result.status_code}"
+        )
+
+    contents = await result.bytes()
+
+    if not contents:
         raise ValueError(
             f"Uploaded file had no content: {pathname}"
         )
 
-    chunks = []
-
-    async for chunk in result.stream:
-        chunks.append(chunk)
-
-    return b"".join(chunks)
+    return contents
 
 
 @app.get("/api")
