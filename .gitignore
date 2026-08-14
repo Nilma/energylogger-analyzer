@@ -37,3 +37,5 @@ __pycache__/
 
 # Logs
 *.log
+.vercel
+.env*

@@ -26,27 +26,20 @@ type ComparisonResult = {
     energy_difference_j: number;
     percentage_change: number;
     average_power_difference_w: number;
-
-    rail_comparison: Record<
-      string,
-      RailComparison
-    >;
+    duration_difference_s: number;
+    rail_comparison: Record<string, RailComparison>;
   };
 };
 
 export default function ComparePage() {
-  const [file1, setFile1] =
-    useState<File | null>(null);
-
-  const [file2, setFile2] =
-    useState<File | null>(null);
+  const [file1, setFile1] = useState<File | null>(null);
+  const [file2, setFile2] = useState<File | null>(null);
 
   const [result, setResult] =
     useState<ComparisonResult | null>(null);
 
   const [error, setError] = useState("");
-  const [loading, setLoading] =
-    useState(false);
+  const [loading, setLoading] = useState(false);
 
   async function handleSubmit(
     event: FormEvent<HTMLFormElement>
@@ -54,9 +47,7 @@ export default function ComparePage() {
     event.preventDefault();
 
     if (!file1 || !file2) {
-      setError(
-        "Choose two CSV log files to compare."
-      );
+      setError("Choose two CSV log files to compare.");
       return;
     }
 
@@ -70,22 +61,26 @@ export default function ComparePage() {
       formData.append("file1", file1);
       formData.append("file2", file2);
 
-      const response = await fetch(
-        "/api/compare",
-        {
-          method: "POST",
-          body: formData,
-        }
-      );
+      const response = await fetch("/api/compare", {
+        method: "POST",
+        body: formData,
+      });
 
-      const data = await response.json();
+      const text = await response.text();
 
       if (!response.ok) {
         throw new Error(
-          data.detail ??
-            "Comparison failed."
+          text || `Server error (${response.status})`
         );
       }
+
+      if (!text) {
+        throw new Error(
+          "The server returned an empty response."
+        );
+      }
+
+      const data = JSON.parse(text);
 
       setResult(data);
     } catch (err) {
@@ -109,8 +104,9 @@ export default function ComparePage() {
         <h1>Compare measurements</h1>
 
         <p className="intro">
-          Upload two EnergyLogger CSV files to
-          compare their energy consumption.
+          Upload two EnergyLogger CSV files to compare
+          total energy, average power, duration, and
+          energy consumption for each rail.
         </p>
       </section>
 
@@ -141,8 +137,7 @@ export default function ComparePage() {
                   accept=".csv,text/csv"
                   onChange={(event) => {
                     setFile1(
-                      event.target
-                        .files?.[0] ?? null
+                      event.target.files?.[0] ?? null
                     );
 
                     setResult(null);
@@ -169,8 +164,7 @@ export default function ComparePage() {
                   accept=".csv,text/csv"
                   onChange={(event) => {
                     setFile2(
-                      event.target
-                        .files?.[0] ?? null
+                      event.target.files?.[0] ?? null
                     );
 
                     setResult(null);
@@ -182,11 +176,7 @@ export default function ComparePage() {
 
             <button
               type="submit"
-              disabled={
-                !file1 ||
-                !file2 ||
-                loading
-              }
+              disabled={!file1 || !file2 || loading}
               style={{
                 minHeight: "58px",
               }}
@@ -216,9 +206,7 @@ export default function ComparePage() {
       </p>
 
       {result && (
-        <ComparisonResults
-          result={result}
-        />
+        <ComparisonResults result={result} />
       )}
     </main>
   );
@@ -249,6 +237,11 @@ function ComparisonResults({
       Math.abs(a[1].difference_j)
   );
 
+  const largestRailDifference =
+    railEntries.length > 0
+      ? railEntries[0]
+      : null;
+
   return (
     <>
       <section className="card">
@@ -270,17 +263,16 @@ function ComparisonResults({
           </span>
 
           <strong>
-            {measurement1.total_energy_j.toFixed(
-              1
-            )}{" "}
-            J
+            {measurement1.total_energy_j.toFixed(1)} J
           </strong>
 
           <p>
-            {measurement1.average_power_w.toFixed(
-              2
-            )}{" "}
-            W average
+            {measurement1.average_power_w.toFixed(2)} W
+            average
+          </p>
+
+          <p>
+            {measurement1.duration_s.toFixed(1)} s
           </p>
         </article>
 
@@ -290,17 +282,16 @@ function ComparisonResults({
           </span>
 
           <strong>
-            {measurement2.total_energy_j.toFixed(
-              1
-            )}{" "}
-            J
+            {measurement2.total_energy_j.toFixed(1)} J
           </strong>
 
           <p>
-            {measurement2.average_power_w.toFixed(
-              2
-            )}{" "}
-            W average
+            {measurement2.average_power_w.toFixed(2)} W
+            average
+          </p>
+
+          <p>
+            {measurement2.duration_s.toFixed(1)} s
           </p>
         </article>
 
@@ -338,21 +329,34 @@ function ComparisonResults({
             <strong>
               {Math.abs(difference).toFixed(1)} J
             </strong>{" "}
-            {difference < 0
-              ? "less"
-              : "more"}{" "}
-            energy than{" "}
-            {measurement1.filename}. This is a{" "}
+            {difference < 0 ? "less" : "more"} energy
+            than {measurement1.filename}. This is a{" "}
             <strong>
-              {Math.abs(
-                percentage
-              ).toFixed(1)}
-              %
+              {Math.abs(percentage).toFixed(1)}%
             </strong>{" "}
-            {difference < 0
-              ? "reduction"
-              : "increase"}{" "}
-            in energy consumption.
+            {difference < 0 ? "reduction" : "increase"}.
+          </p>
+        )}
+
+        {largestRailDifference && (
+          <p
+            style={{
+              marginTop: "18px",
+              color: "#68748a",
+            }}
+          >
+            Largest rail difference:{" "}
+            <strong>
+              {largestRailDifference[0]}
+            </strong>{" "}
+            (
+            {largestRailDifference[1].difference_j > 0
+              ? "+"
+              : ""}
+            {largestRailDifference[1].difference_j.toFixed(
+              1
+            )}{" "}
+            J)
           </p>
         )}
       </section>
@@ -391,33 +395,22 @@ function ComparisonResults({
                     <td>{rail}</td>
 
                     <td>
-                      {values.measurement1_j.toFixed(
-                        1
-                      )}{" "}
-                      J
+                      {values.measurement1_j.toFixed(1)} J
                     </td>
 
                     <td>
-                      {values.measurement2_j.toFixed(
-                        1
-                      )}{" "}
-                      J
+                      {values.measurement2_j.toFixed(1)} J
                     </td>
 
                     <td>
-                      {values.difference_j >
-                      0
+                      {values.difference_j > 0
                         ? "+"
                         : ""}
-                      {values.difference_j.toFixed(
-                        1
-                      )}{" "}
-                      J
+                      {values.difference_j.toFixed(1)} J
                     </td>
 
                     <td>
-                      {values.percentage_change >
-                      0
+                      {values.percentage_change > 0
                         ? "+"
                         : ""}
                       {values.percentage_change.toFixed(
